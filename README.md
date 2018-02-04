@@ -255,52 +255,115 @@ for (i in 1:l)
 | knn |    0.04   |
     
 
+## Potential function algorithm
+It's just a slight modification of parzen window algorithm:
 
-  ## Parzen window algorithm
-Let' s define *ω(i, u)* as a function of distance rather than neighbor rank.
+![potential](https://github.com/toxazol/machineLearning/blob/master/img/Screenshot%20from%202017-12-16%2013-40-38.png)
 
-![parzenw](https://github.com/toxazol/machineLearning/blob/master/img/Screenshot%20from%202017-12-16%2013-27-53.png?raw=true) 
+Now window width *h* depends on training object *x*. *γ* represents
+importance of each such object.
 
-where *K(z)* is  nonincreasing on [0, ∞)  kernel function. Then our metric classifier will look like this:
+All these *2l* params can be obtained/adjusted with the following
+procedure:
 
-![parzen](https://github.com/toxazol/machineLearning/blob/master/img/Screenshot%20from%202017-12-16%2013-31-51.png?raw=true)
-
-This is how kernel functions graphs look like:
-![kernels](https://github.com/toxazol/machineLearning/blob/master/img/main-qimg-ece54bb2db23a4f823e3fdb6058761e8.png?raw=true)
-
-Here are some of them implemented in *R*:
 ```R
-ker1 <- (function(r) max(0.75*(1-r*r),0)) # epanechnikov
-ker2 <- (function(r) max(0,9375*(1-r*r),0)) # quartic
-ker3 <- (function(r) max(1-abs(r),0)) # triangle
-ker4 <- (function(r) ((2*pi)^(-0.5))*exp(-0.5*r*r)) # gaussian
-ker5 <- (function(r) ifelse(abs(r)<=1, 0.5, 0)) # uniform
+potentialParamsFinder <- function(dataSet){
+  n = dim(dataSet)[1]; m = dim(dataSet)[2]-1
+  params = cbind(rep(1,n), rep(0,n))
+  for(i in 1:n){
+    repeat{
+      res = potentialClassifier(dataSet, dataSet[i, 1:m], params)[1]
+      if(res == dataSet[i,m+1]) break
+      params[i,2] = params[i,2] + 1
+    }
+  }
+  return(params)
+}
 ```
 
-Parameter *h* is called "window width" and is similar to number of neighbors *k* in kNN.
-Here optimal *h* is found using LOO (epanechnikov kernel, sepal.width & sepal.length only): 
+Though this process on a sufficiently big sample can take considerable
+amount of time. Here is the result of found and applyied params:
 
-![LOOker1parzen2](https://github.com/toxazol/machineLearning/blob/master/img/LOOker1parzen2.png?raw=true)
+![potential](https://github.com/toxazol/machineLearning/blob/master/img/potential.png)
 
-all four features:
+## STOLP algorithm
+This algorithm implements data set compression by finding regular (etalon)
+objects (stolps) and removing objects which do not or harmfully affect classification from sample.
+To explain how this algorithm works idea of *margin* has to be introduced.
+> **Margin** of an object (*M(x)*) shows us, how deeply current object lies within its class.
+![margin](https://github.com/toxazol/machineLearning/blob/master/img/Screenshot%from%2017-12-16%15-07-53.png)
 
-![LOOker1parzen4](https://github.com/toxazol/machineLearning/blob/master/img/LOOker1parzen4.png?raw=true)
+Here is **R** implementation of STOLP algorithm:
+```R
+STOLP <- function(set, threshold, classifier, argsList){
+  plot(iris[,3:4], bg=colors2[iris$Species], col=colors2[iris$Species])
+  rowsNum <- dim(set)[1]
+  varsNum <- dim(set)[2]-1
+  toDelete = numeric()
+  for(i in 1:rowsNum){
+    currentArgs = c(list(set, set[i, 1:varsNum]),argsList)
+    res = do.call(classifier,currentArgs)
+    if(res[1] != set[i, varsNum+1]){
+      toDelete <- c(toDelete, i)
+    }
+  }
+  points(set[toDelete,], pch=21, bg='grey', col='grey') # debug
+  set = set[-toDelete, ]; rowsNum = rowsNum - length(toDelete)
+  labels = levels(set[rowsNum,varsNum+1])
+  maxRes = rep(0, length(labels)); names(maxRes)<-labels
+  maxLabel = rep(0, length(labels)); names(maxLabel)<-labels
+  for(i in 1:rowsNum){
+    currentArgs = c(list(set, set[i, 1:varsNum]),argsList)
+    res = do.call(classifier,currentArgs)
+    if(res[2] > maxRes[res[1]]){
+      maxRes[res[1]] = res[2]
+      maxLabel[res[1]] = i
+    }
+  }
+  regular = set[maxLabel, ]
+  points(regular, pch=21, bg=colors2[regular$Species], col=colors2[regular$Species])
+  repeat{
+    errCount = 0L; toAdd = 0L; maxAbsMargin = -1
+    for(i in 1:rowsNum){
+      currentArgs = c(list(regular, set[i, 1:varsNum]),argsList)
+      res = do.call(classifier,currentArgs)
+      if(res[1] != set[i, varsNum+1]){
+        errCount = errCount + 1
+        if(as.double(res[2]) > maxAbsMargin)
+          toAdd <- i
+          maxAbsMargin <- as.double(res[2])
+      }
+    }
+    if(errCount <= threshold)
+      return(regular)
+    newRegular = set[toAdd,]
+    regular = rbind(regular,newRegular)
+    points(newRegular, pch=21, bg=colors2[newRegular$Species], col=colors2[newRegular$Species])
+  }
+}
+```
 
-triangle kernel, h=0.4:
+Here are STOLP compression results for kNN, kWNN, parzen windowss algorithms respectively:
 
-![h04ker3parzen2](https://github.com/toxazol/machineLearning/blob/master/img/h04ker3parzen2.png?raw=true)
+![stolpKnn](https://github.com/toxazol/machineLearning/blob/master/img/stolpKnn.png)
+![stolpKwnn](https://github.com/toxazol/machineLearning/blob/master/img/stolpKwnn.png)
+![stolpParzen](https://github.com/toxazol/machineLearning/blob/master/img/stolpParzen.png)
 
-gaussian kernel, h=0.1:
 
-![h01ker4parzen2](https://github.com/toxazol/machineLearning/blob/master/img/h01ker4parzen2.png?raw=true)
+## Conclusion
 
-Parzen window algorithm can be modified to suit case-based reasoning better.
-It's what we call **parzen window algorithm with variable window width**.
-Let *h* be equal to the distance to *k+1* nearest neighbor.
-Here is comparison of parzen window classifier (uniform kernel) without and with variable window width modification applied:
-![parzenKer5](https://github.com/toxazol/machineLearning/blob/master/img/parzenKer5.png?raw=true)
-![parzenKer5Var](https://github.com/toxazol/machineLearning/blob/master/img/parzenKer5Var.png?raw=true)
+Here is a summary of results obtained by LOO for different algorithms on *iris* data set:
 
+| algorithm                                        | best parameter | errors | empirical risk |
+| -------------------------------------------------|--------------- |--------|----------------|
+| kNN (4 features)                                 |      best k: 19|       3|            0.02|
+| kNN (2 features)                                 |       best k: 6|       5|          0.0(3)|
+|parzen window (epanechnikov kernel, 4 features)   |    best h: 0.8 |       5|          0.0(3)|
+|parzen window (gaussian kernel)                   |    best h: 0.02|       5|          0.0(3)|
+|parzen window /w variable window (uniform kernel) |       best k: 1|       5|          0.0(3)|
+|parzen window /w variable window (gaussian kernel)|       best k: 1|       6|            0.04|
+|parzen window (first 3 kernels, 2 features)       |     best h: 0.4|       6|            0.04|
+| kWNN                                             |     best q: 0.6|       6|            0.04|
 
 
 
